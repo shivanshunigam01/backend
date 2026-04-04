@@ -1,0 +1,85 @@
+const Product = require('../models/Product');
+const HeroSlide = require('../models/HeroSlide');
+const Offer = require('../models/Offer');
+const Banner = require('../models/Banner');
+const FAQ = require('../models/FAQ');
+const Testimonial = require('../models/Testimonial');
+const SiteConfig = require('../models/SiteConfig');
+const DealerSettings = require('../models/DealerSettings');
+const ApiError = require('../utils/apiError');
+const asyncHandler = require('../utils/asyncHandler');
+const { successResponse } = require('../utils/apiResponse');
+
+const defaultSiteConfig = {
+  whatsappNumber: '919231445060',
+  phoneNumber: '+91 9231445060',
+  heroTagline: "Bihar's First VinFast Dealer",
+  leadStripTitle: 'Ready to Go Electric?',
+  leadStripSubtitle: 'Leave your details and our EV advisor will reach out in 10 minutes.',
+  vf7Price: '₹21.89L*',
+  vf6Price: '₹17.29L*',
+  vf7Range: '431 km',
+  vf6Range: '381 km',
+};
+
+const defaultDealerSettings = {
+  dealerName: 'Patliputra Auto',
+  brand: 'VinFast',
+  phone: '+91 9231445060',
+  email: 'info@patliputraauto.com',
+  whatsapp: '919231445060',
+};
+
+exports.getSiteConfig = asyncHandler(async (req, res) => {
+  let doc = await SiteConfig.findOne();
+  if (!doc) doc = await SiteConfig.create(defaultSiteConfig);
+  return successResponse(res, doc);
+});
+
+exports.getDealerSettings = asyncHandler(async (req, res) => {
+  let doc = await DealerSettings.findOne();
+  if (!doc) doc = await DealerSettings.create(defaultDealerSettings);
+  return successResponse(res, doc);
+});
+
+exports.getHeroSlides = asyncHandler(async (req, res) => {
+  const data = await HeroSlide.find({ active: true }).sort({ order: 1, createdAt: -1 });
+  return successResponse(res, data);
+});
+
+exports.getProducts = asyncHandler(async (req, res) => {
+  const data = await Product.find({ active: true })
+    .select('slug name tagline priceFrom heroImage active order')
+    .sort({ order: 1, createdAt: -1 });
+  return successResponse(res, data);
+});
+
+exports.getProductBySlug = asyncHandler(async (req, res) => {
+  const data = await Product.findOne({ slug: req.params.slug.toLowerCase(), active: true });
+  if (!data) throw new ApiError(404, 'Product not found');
+  return successResponse(res, data);
+});
+
+exports.getOffers = asyncHandler(async (req, res) => {
+  const query = { active: true };
+  if (req.query.model) query.model = req.query.model;
+  const data = await Offer.find(query).sort({ validTill: 1, createdAt: -1 });
+  return successResponse(res, data);
+});
+
+exports.getBanners = asyncHandler(async (req, res) => {
+  const data = await Banner.find({ active: true }).sort({ order: 1, createdAt: -1 });
+  return successResponse(res, data);
+});
+
+exports.getFAQs = asyncHandler(async (req, res) => {
+  const query = { active: true };
+  if (req.query.category) query.category = req.query.category;
+  const data = await FAQ.find(query).sort({ order: 1, createdAt: -1 });
+  return successResponse(res, data);
+});
+
+exports.getTestimonials = asyncHandler(async (req, res) => {
+  const data = await Testimonial.find({ active: true }).sort({ order: 1, createdAt: -1 });
+  return successResponse(res, data);
+});
