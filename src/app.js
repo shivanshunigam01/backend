@@ -34,7 +34,7 @@ const healthPayload = () => ({
   success: true,
   status: 'ok',
   service: 'Patliputra Showroom API',
-  message: 'Server is healthy',
+  message: 'Server is healthy very healthy',
   timestamp: new Date().toISOString(),
 });
 
