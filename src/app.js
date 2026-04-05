@@ -30,8 +30,22 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
 
+const healthPayload = () => ({
+  success: true,
+  status: 'ok',
+  service: 'Patliputra Showroom API',
+  message: 'Server is healthy',
+  timestamp: new Date().toISOString(),
+});
+
+/** Root — for load balancers / uptime checks when proxy forwards `/health` only. */
 app.get('/health', (req, res) => {
-  res.status(200).json({ success: true, message: 'Server is healthy' });
+  res.status(200).json(healthPayload());
+});
+
+/** Same check under API prefix — use this if you only expose `/api/v1/*` to the internet. */
+app.get('/api/v1/health', (req, res) => {
+  res.status(200).json(healthPayload());
 });
 
 app.use('/api/v1', publicRoutes);
