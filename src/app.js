@@ -12,13 +12,26 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 
+/** Comma-separated origins, no trailing slash. Browsers send exact Origin (e.g. https://patliputravinfast.in). */
+function corsAllowedOrigins() {
+  const raw = process.env.CLIENT_URL || '';
+  return raw
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+}
 
-//laddoo
 app.use(
   cors({
-    origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL] : '*',
+    origin(origin, callback) {
+      const list = corsAllowedOrigins();
+      if (!origin) return callback(null, true);
+      if (list.length === 0) return callback(null, true);
+      if (list.includes(origin)) return callback(null, true);
+      callback(null, false);
+    },
     credentials: true,
-  })
+  }),
 );
 app.use(helmet());
 app.use(compression());
