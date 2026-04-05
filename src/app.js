@@ -12,6 +12,8 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 
+
+//laddoo
 app.use(
   cors({
     origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL] : '*',
