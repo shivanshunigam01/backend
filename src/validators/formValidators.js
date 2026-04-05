@@ -1,14 +1,18 @@
 const { body } = require('express-validator');
-const { enquiryInterests } = require('../constants/enums');
+const { enquiryInterests, productModels } = require('../constants/enums');
 
 const mobileRule = body('mobile')
   .matches(/^[6-9]\d{9}$/)
   .withMessage('Invalid mobile');
 
+const testDriveModels = productModels.filter((m) => m !== 'Both');
+
 exports.leadValidator = [
   body('name').trim().isLength({ min: 2 }).withMessage('Name is required'),
   mobileRule,
-  body('model').isIn(['VF 6', 'VF 7', 'Both']).withMessage('Model must be VF 6, VF 7 or Both'),
+  body('model')
+    .isIn(productModels)
+    .withMessage(`Model must be one of: ${productModels.join(', ')}`),
   body('city').trim().notEmpty().withMessage('City is required'),
   body('otherCity').custom((value, { req }) => {
     if (req.body.city === 'Other' && !String(value || '').trim()) {
@@ -21,7 +25,9 @@ exports.leadValidator = [
 exports.testDriveValidator = [
   body('customerName').trim().isLength({ min: 2 }).withMessage('Customer name is required'),
   mobileRule,
-  body('model').isIn(['VF 6', 'VF 7']).withMessage('Model must be VF 6 or VF 7'),
+  body('model')
+    .isIn(testDriveModels)
+    .withMessage(`Model must be one of: ${testDriveModels.join(', ')}`),
   body('preferredDate').isISO8601().withMessage('Preferred date is required'),
 ];
 

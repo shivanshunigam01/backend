@@ -12,7 +12,8 @@ module.exports = {
   ],
   testDriveStatuses: ['Pending', 'Scheduled', 'Completed', 'Cancelled', 'No Show'],
   enquiryStatuses: ['Open', 'In Progress', 'Responded', 'Closed'],
-  productModels: ['VF 6', 'VF 7', 'Both'],
+  /** Lead.model allows Both; TestDrive/Enquiry.model use concrete lines only (see models). */
+  productModels: ['VF 6', 'VF 7', 'VF MPV 7', 'Both'],
   enquiryInterests: [
     'General Enquiry',
     'Get On-Road Price',
