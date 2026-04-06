@@ -23,11 +23,16 @@ const defaultSiteConfig = {
 };
 
 const defaultDealerSettings = {
-  dealerName: 'Patliputra Auto',
+  dealerName: 'Patliputra VinFast',
   brand: 'VinFast',
   phone: '+91 9231445060',
   email: 'info@patliputraauto.com',
   whatsapp: '919231445060',
+  address:
+    'Plot No. 2421, NH 30, Bypass Road, Opposite Indian Oil Pump, Paijawa, Patna, Bihar - 800009',
+  gstNo: '',
+  showroomHours: 'Mon–Sat: 9:00 AM – 7:00 PM',
+  mapEmbedUrl: '',
 };
 
 exports.getSiteConfig = asyncHandler(async (req, res) => {
