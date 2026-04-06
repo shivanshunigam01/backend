@@ -5,7 +5,7 @@ const Admin = require('../models/Admin');
 (async () => {
   try {
     await connectDB();
-    const email = process.env.SEED_ADMIN_EMAIL || 'admin@patliputraauto.com';
+    const email = process.env.SEED_ADMIN_EMAIL || 'admin@patliputravinfast.com';
     const existing = await Admin.findOne({ email });
     if (existing) {
       console.log(`Admin already exists for ${email}`);

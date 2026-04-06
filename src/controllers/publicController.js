@@ -18,15 +18,15 @@ const defaultSiteConfig = {
   leadStripSubtitle: 'Leave your details and our EV advisor will reach out in 10 minutes.',
   vf7Price: '₹21.89L*',
   vf6Price: '₹17.29L*',
-  vf7Range: '431 km',
-  vf6Range: '381 km',
+  vf7Range: '532 km',
+  vf6Range: '468 km',
 };
 
 const defaultDealerSettings = {
   dealerName: 'Patliputra VinFast',
   brand: 'VinFast',
   phone: '+91 9231445060',
-  email: 'info@patliputraauto.com',
+  email: 'info@patliputravinfast.com',
   whatsapp: '919231445060',
   address:
     'Plot No. 2421, NH 30, Bypass Road, Opposite Indian Oil Pump, Paijawa, Patna, Bihar - 800009',

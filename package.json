@@ -1,7 +1,7 @@
 {
   "name": "vinfast-backend",
   "version": "1.0.0",
-  "description": "Patliputra Auto × VinFast backend API",
+  "description": "Patliputra Group × VinFast backend API",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

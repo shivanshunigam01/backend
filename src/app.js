@@ -46,7 +46,7 @@ if (process.env.NODE_ENV !== 'production') {
 const healthPayload = () => ({
   success: true,
   status: 'ok',
-  service: 'Patliputra Showroom API',
+  service: 'Patliputra Group Showroom API',
   message: 'Server is healthy very healthy',
   timestamp: new Date().toISOString(),
 });

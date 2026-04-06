@@ -1,4 +1,4 @@
-# Patliputra Auto × VinFast Backend
+# Patliputra Group × VinFast Backend
 
 Production-ready Express + MongoDB backend scaffold aligned to the API documentation shared by the user.
 
