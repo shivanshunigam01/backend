@@ -1,67 +1,31 @@
 /**
- * AiSensy WhatsApp campaign API — sends template messages (e.g. OTP campaign).
- * @see https://aisensy.com/tutorials/api-reference-docs
+ * WhatsApp OTP — Zentroverse / api-wa.co campaign API.
+ * URL and apiKey are fixed in code (not read from .env).
+ * Dynamic per send: destination (user’s number), OTP in button param, FirstName from the form.
  */
-const DEFAULT_URL = 'https://backend.aisensy.com/campaign/t1/api/v2';
 
-function normalizeDestination(mobile10) {
-  const d = String(mobile10 || '').replace(/\D/g, '');
-  if (d.length === 10 && /^[6-9]/.test(d)) return `91${d}`;
-  if (d.length === 12 && d.startsWith('91')) return d;
-  return d;
-}
+const ZENTROVERSE_WA_CAMPAIGN_URL =
+  'https://backend.api-wa.co/campaign/zentroverse-global/api/v2';
 
-/** AiSensy accepts E.164 (+9198…) or 91… per account; toggle with AISENSY_DESTINATION_USE_PLUS. */
-function destinationForAisensy(mobile10) {
-  const digits = normalizeDestination(mobile10);
-  if (!digits || digits.length < 11) return null;
-  if (digits.startsWith('+')) return digits;
-  const usePlus = process.env.AISENSY_DESTINATION_USE_PLUS !== 'false';
-  return usePlus ? `+${digits}` : digits;
-}
+const ZENTROVERSE_WA_API_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5YjgxMWVkODNiYjg3MjY3NGFmMmE3ZSIsIm5hbWUiOiJaZW50cm92ZXJzZSIsImFwcE5hbWUiOiJBaVNlbnN5IiwiY2xpZW50SWQiOiI2OWI4MTFlZDkwZjZjZjBlMDY0NzBkMTciLCJhY3RpdmVQbGFuIjoiTk9ORSIsImlhdCI6MTc3MzY3MDg5M30.wFOeDPo6S3cd2cRlhZ31r_zBS_lTLRgXS-FQuk9XFuc';
+
+const ZENTROVERSE_CAMPAIGN_NAME = 'otp';
+const ZENTROVERSE_USER_NAME = 'Zentroverse';
+const ZENTROVERSE_SOURCE = 'new-landing-page form';
 
 /**
- * Build templateParams that match the WhatsApp template linked to the AiSensy API campaign
- * (same count/order as {{1}}, {{2}}, …). Wrong layout causes:
- * "Template params does not match the campaign".
- *
- * AISENSY_OTP_PARAM_LAYOUT (preferred):
- *   - otp_only     → [OTP] — single-variable OTP templates
- *   - name_otp     → [Name, OTP] — default Meta-style two vars
- *   - otp_name     → [OTP, Name] — reversed two vars
- * Legacy AISENSY_OTP_TEMPLATE_MODE: one → otp_only, two → name_otp
+ * Same shape as sample: "09771495587" — leading 0 + 10-digit Indian mobile.
  */
-function buildTemplateParams(displayName, otpCode) {
-  const first = String(displayName || 'Customer').trim().slice(0, 60) || 'Customer';
-  const code = String(otpCode);
-
-  const explicit = process.env.AISENSY_OTP_PARAM_LAYOUT?.trim()?.toLowerCase();
-  let layout = explicit;
-  if (!layout) {
-    const legacy = (process.env.AISENSY_OTP_TEMPLATE_MODE || 'two').toLowerCase();
-    if (legacy === 'one' || legacy === '1') layout = 'otp_only';
-    else if (legacy === 'two' || legacy === '2') layout = 'name_otp';
-    else layout = 'name_otp';
-  }
-
-  if (layout === 'otp_only' || layout === 'single' || layout === 'one') {
-    return [code];
-  }
-  if (layout === 'otp_name' || layout === 'otp_first') {
-    return [code, first];
-  }
-  // name_otp, name_then_otp, two, default
-  return [first, code];
+function destinationForZentroverseWa(mobile10) {
+  const d = String(mobile10 || '')
+    .replace(/\D/g, '')
+    .slice(-10);
+  if (!/^[6-9]\d{9}$/.test(d)) return null;
+  return `0${d}`;
 }
 
-async function sendCampaignPayload(payload) {
-  const url = (process.env.AISENSY_API_URL || DEFAULT_URL).trim();
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const text = await res.text();
+async function parseCampaignResponse(res, text) {
   let json = {};
   try {
     json = text ? JSON.parse(text) : {};
@@ -82,7 +46,7 @@ async function sendCampaignPayload(payload) {
     throw err;
   }
   if (json && json.success === false) {
-    const msg = json.message || json.error || 'AiSensy rejected the request';
+    const msg = json.message || json.error || 'WhatsApp campaign API rejected the request';
     const err = new Error(msg);
     err.aisensyBody = json;
     throw err;
@@ -91,55 +55,70 @@ async function sendCampaignPayload(payload) {
 }
 
 /**
- * Send OTP via AiSensy campaign named AISENSY_OTP_CAMPAIGN_NAME (e.g. "otp").
+ * Send OTP via Zentroverse WA campaign (replaces env-driven AiSensy URL).
  */
 async function sendOtpViaAisensy({ mobile10, displayName, otpCode }) {
-  const apiKey = process.env.AISENSY_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error('AISENSY_API_KEY is not configured');
-  }
-
-  const destination = destinationForAisensy(mobile10);
+  const destination = destinationForZentroverseWa(mobile10);
   if (!destination) {
     throw new Error('Invalid destination mobile');
   }
 
-  const campaignName = process.env.AISENSY_OTP_CAMPAIGN_NAME?.trim() || 'otp';
-  const userName =
-    process.env.AISENSY_USER_NAME?.trim() ||
-    process.env.AISENSY_SENDER_USER_NAME?.trim() ||
-    'Customer';
-
-  const templateParams = buildTemplateParams(displayName, otpCode);
   const firstNameFallback =
     String(displayName || 'Customer')
       .trim()
       .split(/\s+/)[0] || 'user';
 
-  const otpOnlyTemplate = templateParams.length === 1;
-  const useFirstNameFallback =
-    !otpOnlyTemplate && process.env.AISENSY_USE_PARAMS_FALLBACK_FIRSTNAME !== 'false';
-
-  // Shape matches AiSensy campaign POST examples / n8n integration — avoid empty media/buttons objects.
   const payload = {
-    apiKey,
-    campaignName,
+    apiKey: ZENTROVERSE_WA_API_KEY,
+    campaignName: ZENTROVERSE_CAMPAIGN_NAME,
     destination,
-    userName,
-    templateParams,
-    source: process.env.AISENSY_SOURCE?.trim() || 'website-form',
+    userName: ZENTROVERSE_USER_NAME,
+    templateParams: ['$FirstName'],
+    source: ZENTROVERSE_SOURCE,
+    media: {},
+    buttons: [
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: 0,
+        parameters: [
+          {
+            type: 'text',
+            text: String(otpCode),
+          },
+        ],
+      },
+    ],
+    carouselCards: [],
+    location: {},
     attributes: {},
-    meta_data: [],
-    defaultCountryCode: process.env.AISENSY_DEFAULT_COUNTRY_CODE?.trim() || 'IN',
-    paramsFallbackValue: useFirstNameFallback ? { FirstName: firstNameFallback } : {},
+    paramsFallbackValue: {
+      FirstName: firstNameFallback,
+    },
   };
 
-  return sendCampaignPayload(payload);
+  const res = await fetch(ZENTROVERSE_WA_CAMPAIGN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  return parseCampaignResponse(res, text);
+}
+
+function normalizeDestination(mobile10) {
+  const d = String(mobile10 || '').replace(/\D/g, '');
+  if (d.length === 10 && /^[6-9]/.test(d)) return `91${d}`;
+  if (d.length === 12 && d.startsWith('91')) return d;
+  return d;
+}
+
+function destinationForAisensy(mobile10) {
+  return destinationForZentroverseWa(mobile10);
 }
 
 module.exports = {
   sendOtpViaAisensy,
   normalizeDestination,
   destinationForAisensy,
-  buildTemplateParams,
 };

@@ -80,11 +80,11 @@ exports.sendOtp = asyncHandler(async (req, res) => {
   } catch (e) {
     await WhatsappOtpChallenge.deleteOne({ mobile });
     const detail = e.aisensyBody != null ? JSON.stringify(e.aisensyBody) : '';
-    console.error('[whatsapp-otp] AiSensy send failed:', e.message, detail);
+    console.error('[whatsapp-otp] WA campaign send failed:', e.message, detail);
     const verbose = process.env.AISENSY_VERBOSE_ERRORS === 'true';
     const clientMsg = verbose
       ? `WhatsApp send failed: ${e.message}`
-      : 'Could not send WhatsApp message. Check AISENSY_* configuration or try again shortly.';
+      : 'Could not send WhatsApp message. Try again shortly.';
     return errorResponse(res, clientMsg, 502);
   }
 
