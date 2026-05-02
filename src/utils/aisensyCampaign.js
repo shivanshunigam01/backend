@@ -11,6 +11,15 @@ function normalizeDestination(mobile10) {
   return d;
 }
 
+/** AiSensy accepts E.164 (+9198…) or 91… per account; toggle with AISENSY_DESTINATION_USE_PLUS. */
+function destinationForAisensy(mobile10) {
+  const digits = normalizeDestination(mobile10);
+  if (!digits || digits.length < 11) return null;
+  if (digits.startsWith('+')) return digits;
+  const usePlus = process.env.AISENSY_DESTINATION_USE_PLUS !== 'false';
+  return usePlus ? `+${digits}` : digits;
+}
+
 /**
  * Build templateParams based on env — matches your WhatsApp template variable order.
  * AISENSY_OTP_TEMPLATE_MODE=two (default: [FirstName, OTP]) | one (OTP only)
@@ -38,8 +47,23 @@ async function sendCampaignPayload(payload) {
     json = { raw: text };
   }
   if (!res.ok) {
-    const msg = json.message || json.error || text || `HTTP ${res.status}`;
-    throw new Error(msg);
+    const msg =
+      json.message ||
+      json.error ||
+      json.msg ||
+      (Array.isArray(json.errors) && json.errors.join?.('; ')) ||
+      text ||
+      `HTTP ${res.status}`;
+    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    err.status = res.status;
+    err.aisensyBody = json;
+    throw err;
+  }
+  if (json && json.success === false) {
+    const msg = json.message || json.error || 'AiSensy rejected the request';
+    const err = new Error(msg);
+    err.aisensyBody = json;
+    throw err;
   }
   return json;
 }
@@ -53,8 +77,8 @@ async function sendOtpViaAisensy({ mobile10, displayName, otpCode }) {
     throw new Error('AISENSY_API_KEY is not configured');
   }
 
-  const destination = normalizeDestination(mobile10);
-  if (!destination || destination.length < 11) {
+  const destination = destinationForAisensy(mobile10);
+  if (!destination) {
     throw new Error('Invalid destination mobile');
   }
 
@@ -70,6 +94,12 @@ async function sendOtpViaAisensy({ mobile10, displayName, otpCode }) {
       .trim()
       .split(/\s+/)[0] || 'user';
 
+  const mode = (process.env.AISENSY_OTP_TEMPLATE_MODE || 'two').toLowerCase();
+  const otpOnlyTemplate = mode === 'one' || mode === '1';
+  const useFirstNameFallback =
+    !otpOnlyTemplate && process.env.AISENSY_USE_PARAMS_FALLBACK_FIRSTNAME !== 'false';
+
+  // Shape matches AiSensy campaign POST examples / n8n integration — avoid empty media/buttons objects.
   const payload = {
     apiKey,
     campaignName,
@@ -77,14 +107,10 @@ async function sendOtpViaAisensy({ mobile10, displayName, otpCode }) {
     userName,
     templateParams,
     source: process.env.AISENSY_SOURCE?.trim() || 'website-form',
-    media: {},
-    buttons: [],
-    carouselCards: [],
-    location: {},
     attributes: {},
-    paramsFallbackValue: {
-      FirstName: firstNameFallback,
-    },
+    meta_data: [],
+    defaultCountryCode: process.env.AISENSY_DEFAULT_COUNTRY_CODE?.trim() || 'IN',
+    paramsFallbackValue: useFirstNameFallback ? { FirstName: firstNameFallback } : {},
   };
 
   return sendCampaignPayload(payload);
@@ -93,4 +119,5 @@ async function sendOtpViaAisensy({ mobile10, displayName, otpCode }) {
 module.exports = {
   sendOtpViaAisensy,
   normalizeDestination,
+  destinationForAisensy,
 };
