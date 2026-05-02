@@ -10,6 +10,17 @@ const MAX_VERIFY_ATTEMPTS = Number(process.env.WHATSAPP_OTP_MAX_ATTEMPTS || 6);
 const TOKEN_EXPIRES =
   process.env.WHATSAPP_OTP_TOKEN_EXPIRES_IN?.trim() || process.env.JWT_EXPIRES_IN?.trim() || '15m';
 
+/** Aligns DB row lifetime after verify with JWT `expiresIn` (e.g. 15m, 1h). */
+function tokenExpiryToMs(expiresIn) {
+  const s = String(expiresIn || '15m').trim();
+  const m = s.match(/^(\d+)(s|m|h|d)$/i);
+  if (!m) return 15 * 60 * 1000;
+  const n = parseInt(m[1], 10);
+  const u = m[2].toLowerCase();
+  const table = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
+  return n * (table[u] || 60 * 1000);
+}
+
 function isOtpEnabled() {
   return process.env.WHATSAPP_OTP_ENABLED === 'true';
 }
@@ -49,11 +60,18 @@ exports.sendOtp = asyncHandler(async (req, res) => {
 
   const otp = String(crypto.randomInt(100000, 1000000));
   const codeHash = hashOtp(mobile, otp);
+  const sentAt = new Date();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
   await WhatsappOtpChallenge.findOneAndUpdate(
     { mobile },
-    { codeHash, expiresAt, verifyAttempts: 0 },
+    {
+      codeHash,
+      expiresAt,
+      otpSentAt: sentAt,
+      verifiedAt: null,
+      verifyAttempts: 0,
+    },
     { upsert: true, new: true }
   );
 
@@ -88,6 +106,14 @@ exports.verifyOtp = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Code expired or not found. Request a new code on WhatsApp.', 400);
   }
 
+  if (!doc.codeHash) {
+    return errorResponse(
+      res,
+      'This number is already verified or no code is pending. Request a new code if you need to verify again.',
+      400
+    );
+  }
+
   if (doc.verifyAttempts >= MAX_VERIFY_ATTEMPTS) {
     await WhatsappOtpChallenge.deleteOne({ mobile });
     return errorResponse(res, 'Too many attempts. Request a new code.', 429);
@@ -101,7 +127,20 @@ exports.verifyOtp = asyncHandler(async (req, res) => {
     return errorResponse(res, 'Incorrect code. Try again.', 400);
   }
 
-  await WhatsappOtpChallenge.deleteOne({ mobile });
+  const verifiedAt = new Date();
+  const sessionUntil = new Date(Date.now() + tokenExpiryToMs(TOKEN_EXPIRES));
+
+  await WhatsappOtpChallenge.findOneAndUpdate(
+    { mobile },
+    {
+      $unset: { codeHash: 1 },
+      $set: {
+        verifiedAt,
+        expiresAt: sessionUntil,
+        verifyAttempts: 0,
+      },
+    }
+  );
 
   const verificationToken = jwt.sign(
     { purpose: 'wa_otp', mobile },
