@@ -11,13 +11,15 @@ const { mongoIdParam, adminUserValidator, productValidator, mediaValidator, slid
 router.post('/auth/login', loginValidator, validate, authController.login);
 router.get('/auth/me', protect, authController.me);
 
+/** Legacy alias — same handler as GET /api/v1/public/All_leads (no JWT). */
+router.get('/All_leads', ctrl.getAllLeads);
+
 router.use(protect);
 
 // Dashboard
 router.get('/dashboard/stats', dashboardController.getStats);
 
 // Leads
-router.get('/All_leads', ctrl.getAllLeads);
 router.get('/leads', ctrl.getLeads);
 router.post('/leads', ctrl.createLead);
 router.get('/leads/:id', mongoIdParam, validate, ctrl.getLead);

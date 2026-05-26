@@ -30,6 +30,12 @@ Production-ready Express + MongoDB backend scaffold aligned to the API documenta
 - Public: `/api/v1`
 - Admin: `/api/v1/admin`
 
+## Meta Lead (no JWT)
+After deploy, these work without `Authorization`:
+- `GET /api/v1/admin/All_leads` (registered before admin `protect` middleware)
+- `GET /api/v1/public/All_leads`
+- `GET /api/v1/meta-leads`
+
 ## Notes
 - Media upload is assumed to happen directly from frontend to Cloudinary using an unsigned preset.
 - Backend stores metadata and can delete Cloudinary assets using server credentials.

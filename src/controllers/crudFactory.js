@@ -21,13 +21,12 @@ exports.getAll = (Model, options = {}) =>
       Object.assign(query, options.filterMapper(req));
     }
 
-    const [data, total] = await Promise.all([
-      Model.find(query)
-        .sort(req._sort || { createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      Model.countDocuments(query),
-    ]);
+    let listQuery = Model.find(query).sort(req._sort || { createdAt: -1 }).skip(skip).limit(limit);
+    if (options.populate) {
+      listQuery = listQuery.populate(options.populate);
+    }
+
+    const [data, total] = await Promise.all([listQuery, Model.countDocuments(query)]);
 
     return successResponse(res, data, undefined, 200, { page, limit, total });
   });

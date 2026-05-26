@@ -33,6 +33,7 @@ function buildLeadListQuery(req) {
 exports.getLeads = getAll(Lead, {
   searchFields: LEAD_SEARCH_FIELDS,
   filterMapper: (req) => buildLeadListQuery(req),
+  populate: { path: 'assignedTo', select: 'name email' },
 });
 
 /** All leads in one response (no pagination) — used by admin leads list & export. */
