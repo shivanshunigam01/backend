@@ -30,6 +30,8 @@ router.put('/leads/:id', mongoIdParam, validate, ctrl.updateLead);
 router.delete('/leads/:id', mongoIdParam, validate, authorize('superadmin'), ctrl.deleteLead);
 
 // Meta leads (DB-backed webhook records)
+router.post('/meta-leads', metaLeadsController.createManualMetaLead);
+router.post('/meta-leads/bulk', metaLeadsController.bulkCreateMetaLeads);
 router.put('/meta-leads/:id', mongoIdParam, validate, metaLeadsController.updateMetaLead);
 
 // Test drives
