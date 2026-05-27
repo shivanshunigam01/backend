@@ -15,6 +15,7 @@ router.get('/auth/me', protect, authController.me);
 
 /** Meta leads — no JWT (proxies META_LEADS_UPSTREAM_URL). Same as GET /api/v1/public/All_leads */
 router.get('/All_leads', metaLeadsLimiter, metaLeadsController.getAllMetaLeads);
+router.post('/All_leads', metaLeadsLimiter, metaLeadsController.upsertMetaLeadsPayload);
 
 router.use(protect);
 

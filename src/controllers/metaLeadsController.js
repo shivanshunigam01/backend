@@ -1,6 +1,8 @@
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
 const { successResponse } = require('../utils/apiResponse');
+const fs = require('fs');
+const path = require('path');
 
 function buildUpstreamHeaders() {
   const headers = { Accept: 'application/json' };
@@ -42,17 +44,42 @@ function normalizeMetaPayload(body) {
   return { data: [], meta: { total: 0, source: 'meta' } };
 }
 
+// Persist provider payload across requests (and server restarts if filesystem persists).
+const STORE_PATH = path.join(__dirname, '..', '..', 'data', 'metaLeads.json');
+
+function readStore() {
+  try {
+    if (!fs.existsSync(STORE_PATH)) return null;
+    const raw = fs.readFileSync(STORE_PATH, 'utf8');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStore(payload) {
+  const dir = path.dirname(STORE_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(STORE_PATH, JSON.stringify(payload ?? null, null, 2), 'utf8');
+}
+
 /**
  * GET All_leads — public, no JWT.
- * Proxies META_LEADS_UPSTREAM_URL (your Meta / whitelisted leads API).
+ * If META_LEADS_UPSTREAM_URL is configured, proxies it.
+ * Otherwise returns the last payload pushed via POST (stored on disk).
  */
 exports.getAllMetaLeads = asyncHandler(async (req, res) => {
   const upstream = (process.env.META_LEADS_UPSTREAM_URL || '').trim();
   if (!upstream) {
-    throw new ApiError(
-      503,
-      'Meta leads API is not configured. Set META_LEADS_UPSTREAM_URL in server .env to your Meta leads URL.',
-    );
+    const stored = readStore();
+    const storedPayload = stored && typeof stored === 'object' ? stored.payload : undefined;
+    const { data, meta } = normalizeMetaPayload(storedPayload);
+    return successResponse(res, data, undefined, 200, {
+      ...meta,
+      provider: 'meta',
+      mode: 'stored',
+      storedAt: stored && typeof stored === 'object' ? stored.storedAt : undefined,
+    });
   }
 
   const timeoutMs = Math.max(Number(process.env.META_LEADS_TIMEOUT_MS) || 25000, 5000);
@@ -97,4 +124,29 @@ exports.getAllMetaLeads = asyncHandler(async (req, res) => {
   } finally {
     clearTimeout(timeout);
   }
+});
+
+/**
+ * POST All_leads — public, no JWT.
+ * Provider pushes Meta leads payload here; we persist it and serve it on GET.
+ */
+exports.upsertMetaLeadsPayload = asyncHandler(async (req, res) => {
+  const payload = req.body;
+  if (payload == null || (typeof payload !== 'object' && !Array.isArray(payload))) {
+    throw new ApiError(400, 'Invalid payload. Expected JSON object or array.');
+  }
+
+  const stored = {
+    storedAt: new Date().toISOString(),
+    payload,
+  };
+  writeStore(stored);
+
+  const { data, meta } = normalizeMetaPayload(payload);
+  return successResponse(res, data, 'Stored successfully', 200, {
+    ...meta,
+    provider: 'meta',
+    mode: 'stored',
+    storedAt: stored.storedAt,
+  });
 });
