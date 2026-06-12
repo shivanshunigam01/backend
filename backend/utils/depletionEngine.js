@@ -1,66 +1,89 @@
-const DemoVehicle      = require('../models/DemoVehicle');
+const DemoVehicle = require('../models/DemoVehicle');
 const VehicleStatusLog = require('../models/VehicleStatusLog');
 const { sendNotification } = require('./notifications');
 
-const KM_THRESHOLD        = 5000;
-const BATTERY_LOW_THRESH  = 20;
+const BATTERY_LOW_THRESHOLD = 20;
+const KM_SERVICE_THRESHOLD = 5000;
 const IDLE_DAYS_THRESHOLD = 7;
 
 /**
- * Run post-test-drive depletion checks and fire alerts as needed.
- * Called automatically from tdLogController after every endTestDrive.
+ * Run depletion checks after a test drive ends.
+ * Handles battery alerts, service due, idle vehicle detection.
  */
-exports.checkDepletionAlerts = async (vehicleId, adminId = null) => {
-  const vehicle = await DemoVehicle.findById(vehicleId);
-  if (!vehicle) return [];
+async function checkDepletionAlerts(vehicleId) {
+  const vehicle = await DemoVehicle.findById(vehicleId).populate('branchId', 'name');
+  if (!vehicle) return;
 
   const alerts = [];
 
-  // 1. Total KM threshold
-  if (vehicle.totalTestDriveKM >= KM_THRESHOLD) {
-    alerts.push({ type: 'KM_THRESHOLD', vehicle: vehicle.vehicleId, km: vehicle.totalTestDriveKM });
-    await sendNotification({
-      recipientType: 'ADMIN',
-      channel: 'IN_APP',
-      templateKey: 'VEHICLE_BATTERY_LOW',
-      payload: { vehicleId: vehicle.vehicleId, batteryPercent: vehicle.batteryPercent, message: `Total KM (${vehicle.totalTestDriveKM}) exceeded threshold of ${KM_THRESHOLD} km` }
-    });
-  }
-
-  // 2. Battery too low
-  if (vehicle.batteryPercent <= BATTERY_LOW_THRESH && vehicle.status === 'AVAILABLE') {
-    alerts.push({ type: 'BATTERY_LOW', vehicle: vehicle.vehicleId, battery: vehicle.batteryPercent });
-
-    await VehicleStatusLog.create({
-      vehicleId,
-      fromStatus: 'AVAILABLE',
-      toStatus:   'BATTERY_LOW',
-      changedBy:  adminId,
-      reason:     `Auto: battery at ${vehicle.batteryPercent}% (threshold ${BATTERY_LOW_THRESH}%)`
-    });
-
+  // Battery low check
+  if (vehicle.batteryPercent <= BATTERY_LOW_THRESHOLD && vehicle.status === 'AVAILABLE') {
+    const prevStatus = vehicle.status;
     vehicle.status = 'BATTERY_LOW';
     await vehicle.save();
-
-    await sendNotification({
-      recipientType: 'ADMIN',
-      channel: 'IN_APP',
-      templateKey: 'VEHICLE_BATTERY_LOW',
-      payload: { vehicleId: vehicle.vehicleId, batteryPercent: vehicle.batteryPercent }
+    await VehicleStatusLog.create({
+      vehicleId,
+      fromStatus: prevStatus,
+      toStatus: 'BATTERY_LOW',
+      reason: `Battery at ${vehicle.batteryPercent}% (threshold: ${BATTERY_LOW_THRESHOLD}%)`
     });
+    await sendNotification({
+      channel: 'SYSTEM',
+      recipientType: 'ADMIN',
+      recipientId: 'system',
+      recipientContact: '',
+      templateKey: 'VEHICLE_BATTERY_LOW',
+      payload: { vehicleId: vehicle.vehicleId, model: vehicle.model, battery: vehicle.batteryPercent }
+    });
+    alerts.push('BATTERY_LOW');
   }
 
-  // 3. Vehicle idle too long (check updatedAt)
-  const idleDays = Math.floor((Date.now() - new Date(vehicle.updatedAt).getTime()) / 86400000);
-  if (idleDays >= IDLE_DAYS_THRESHOLD) {
-    alerts.push({ type: 'IDLE', vehicle: vehicle.vehicleId, idleDays });
-    await sendNotification({
-      recipientType: 'MANAGER',
-      channel: 'IN_APP',
-      templateKey: 'VEHICLE_IDLE_ALERT',
-      payload: { vehicleId: vehicle.vehicleId, idleDays }
+  // Service due check
+  if (vehicle.serviceDueDate && new Date(vehicle.serviceDueDate) <= new Date() && vehicle.status === 'AVAILABLE') {
+    const prevStatus = vehicle.status;
+    vehicle.status = 'SERVICE_DUE';
+    await vehicle.save();
+    await VehicleStatusLog.create({
+      vehicleId,
+      fromStatus: prevStatus,
+      toStatus: 'SERVICE_DUE',
+      reason: 'Service date passed'
     });
+    await sendNotification({
+      channel: 'SYSTEM',
+      recipientType: 'ADMIN',
+      recipientId: 'system',
+      recipientContact: '',
+      templateKey: 'VEHICLE_SERVICE_DUE',
+      payload: { vehicleId: vehicle.vehicleId, model: vehicle.model }
+    });
+    alerts.push('SERVICE_DUE');
   }
 
   return alerts;
-};
+}
+
+/**
+ * Check for vehicles that have been idle for too long.
+ */
+async function checkIdleVehicles() {
+  const cutoff = new Date(Date.now() - IDLE_DAYS_THRESHOLD * 24 * 60 * 60 * 1000);
+  const idleVehicles = await DemoVehicle.find({
+    status: 'AVAILABLE',
+    updatedAt: { $lt: cutoff }
+  });
+
+  for (const v of idleVehicles) {
+    await sendNotification({
+      channel: 'SYSTEM',
+      recipientType: 'MANAGER',
+      recipientId: 'system',
+      recipientContact: '',
+      templateKey: 'VEHICLE_BATTERY_LOW',
+      payload: { vehicleId: v.vehicleId, model: v.model, battery: v.batteryPercent }
+    });
+    console.log(`[DepletionEngine] Vehicle ${v.vehicleId} idle for >${IDLE_DAYS_THRESHOLD} days`);
+  }
+}
+
+module.exports = { checkDepletionAlerts, checkIdleVehicles, BATTERY_LOW_THRESHOLD };

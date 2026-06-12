@@ -8,8 +8,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "seed:admin": "node scripts/seedAdmin.js",
-    "seed:td": "node scripts/seedTDModule.js",
-    "seed:td:fresh": "node scripts/seedTDModule.js --fresh"
+    "seed:td": "node scripts/seedTD.js",
+    "seed:td:force": "node scripts/seedTD.js --force"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -1,52 +1,91 @@
-const TDBooking    = require('../models/TDBooking');
-const TDSlotConfig = require('../models/TDSlotConfig');
-
-const timeToMins = (str) => { const [h, m] = str.split(':').map(Number); return h * 60 + m; };
-const minsToTime = (m)   => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const TDBooking = require('../models/TDBooking');
 
 /**
- * Return available time slots for a given branch + date.
- * @param {string} branchId
- * @param {Date}   date
- * @param {number} slotDuration  in minutes (30 / 45 / 60)
+ * Convert "HH:MM" time string to minutes since midnight.
  */
-exports.getAvailableSlots = async (branchId, date, slotDuration = 30) => {
-  const startOfDay = new Date(date); startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay   = new Date(date); endOfDay.setHours(23, 59, 59, 999);
+function toMinutes(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m;
+}
 
-  // Look for a custom config for this branch+day; fall back to defaults
-  const config = await TDSlotConfig.findOne({
-    branchId,
-    date: { $gte: startOfDay, $lte: endOfDay }
-  });
+/**
+ * Convert minutes since midnight to "HH:MM" string.
+ */
+function toTimeStr(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
-  if (config && config.isBlocked) {
-    return { available: [], all: [], blocked: true, reason: config.blockedReason || 'Branch closed for this day' };
-  }
+/**
+ * Generate all available time slots for a branch on a given date.
+ * @param {string} branchId
+ * @param {string} dateStr - 'YYYY-MM-DD'
+ * @param {object} config - { slotDuration, bufferTime, workingStartTime, workingEndTime, maxConcurrentBookings }
+ * @returns {Array<{ time: string, available: boolean, bookings: number }>}
+ */
+async function getAvailableSlots(branchId, dateStr, config) {
+  const {
+    slotDuration = 60,
+    bufferTime = 15,
+    workingStartTime = '09:00',
+    workingEndTime = '18:00',
+    maxConcurrentBookings = 2
+  } = config;
 
-  const dayStart   = timeToMins(config ? config.startTime : '09:00');
-  const dayEnd     = timeToMins(config ? config.endTime   : '18:00');
-  const duration   = config ? config.slotDuration  : slotDuration;
-  const buffer     = config ? config.bufferTime     : 15;
+  const startOfDay = new Date(`${dateStr}T00:00:00.000Z`);
+  const endOfDay = new Date(`${dateStr}T23:59:59.999Z`);
 
-  // Fetch already booked slots for this branch + day
   const existingBookings = await TDBooking.find({
     branchId,
-    slotDate:      { $gte: startOfDay, $lte: endOfDay },
-    bookingStatus: { $in: ['PENDING', 'CONFIRMED', 'IN_PROGRESS'] }
+    slotDate: { $gte: startOfDay, $lte: endOfDay },
+    bookingStatus: { $nin: ['CANCELLED', 'MISSED'] }
   }).select('slotTime slotDuration');
 
-  const bookedMins = existingBookings.map(b => timeToMins(b.slotTime));
-
-  const all = [];
-  let cur = dayStart;
-
-  while (cur + duration <= dayEnd) {
-    const slotTime = minsToTime(cur);
-    const isBooked = bookedMins.some(bm => Math.abs(cur - bm) < duration + buffer);
-    all.push({ time: slotTime, available: !isBooked, duration });
-    cur += duration + buffer;
+  const slotOccupancy = {};
+  for (const b of existingBookings) {
+    const key = b.slotTime;
+    slotOccupancy[key] = (slotOccupancy[key] || 0) + 1;
   }
 
-  return { available: all.filter(s => s.available), all, blocked: false };
-};
+  const slots = [];
+  let current = toMinutes(workingStartTime);
+  const end = toMinutes(workingEndTime);
+
+  while (current + slotDuration <= end) {
+    const timeKey = toTimeStr(current);
+    const booked = slotOccupancy[timeKey] || 0;
+    slots.push({
+      time: timeKey,
+      available: booked < maxConcurrentBookings,
+      bookings: booked,
+      maxBookings: maxConcurrentBookings
+    });
+    current += slotDuration + bufferTime;
+  }
+
+  return slots;
+}
+
+/**
+ * Check if a specific slot is available (not fully booked and not in the past).
+ */
+async function isSlotAvailable(branchId, slotDate, slotTime, maxConcurrentBookings = 2, excludeBookingId = null) {
+  const dateStr = new Date(slotDate).toISOString().split('T')[0];
+  const startOfDay = new Date(`${dateStr}T00:00:00.000Z`);
+  const endOfDay = new Date(`${dateStr}T23:59:59.999Z`);
+
+  const query = {
+    branchId,
+    slotDate: { $gte: startOfDay, $lte: endOfDay },
+    slotTime,
+    bookingStatus: { $nin: ['CANCELLED', 'MISSED'] }
+  };
+
+  if (excludeBookingId) query._id = { $ne: excludeBookingId };
+
+  const count = await TDBooking.countDocuments(query);
+  return count < maxConcurrentBookings;
+}
+
+module.exports = { getAvailableSlots, isSlotAvailable, toMinutes, toTimeStr };

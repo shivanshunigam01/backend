@@ -1,14 +1,14 @@
-const express    = require('express');
-const controller = require('../../controllers/tdLogController');
-const { protect } = require('../../middleware/auth');
-
+const express = require('express');
 const router = express.Router();
+const ctrl = require('../../controllers/tdLogController');
+const { protect, authorize } = require('../../middleware/auth');
+
 router.use(protect);
 
-router.get('/',                       controller.getLogs);
-router.get('/booking/:bookingId',     controller.getLogByBooking);
-router.post('/start',                 controller.startTestDrive);
-router.put('/:logId/end',             controller.endTestDrive);
-router.post('/:logId/gps',            controller.addGpsPoint);
+router.get('/', ctrl.getLogs);
+router.get('/:id', ctrl.getLogById);
+router.post('/start', ctrl.startTestDrive);
+router.patch('/:logId/end', ctrl.endTestDrive);
+router.patch('/:logId/gps', ctrl.updateGpsRoute);
 
 module.exports = router;

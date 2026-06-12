@@ -1,18 +1,17 @@
-const express    = require('express');
-const controller = require('../../controllers/tdSlotController');
+const express = require('express');
+const router = express.Router();
+const ctrl = require('../../controllers/tdSlotController');
 const { protect, authorize } = require('../../middleware/auth');
 
-const router = express.Router();
+// Public: check available slots for a branch + date
+router.get('/available', ctrl.getAvailableSlotsForDate);
 
-// ── Public: check available slots ─────────────────────────────────────────────
-router.get('/available', controller.getAvailableSlots);
-
-// ── Admin protected ───────────────────────────────────────────────────────────
 router.use(protect);
 
-router.get('/',         controller.getSlotConfigs);
-router.post('/',        authorize('superadmin', 'manager'), controller.createSlotConfig);
-router.post('/block',   authorize('superadmin', 'manager'), controller.blockSlot);
-router.put('/:id',      authorize('superadmin', 'manager'), controller.updateSlotConfig);
+router.get('/', ctrl.getAllConfigs);
+router.get('/config', ctrl.getSlotConfig);
+router.post('/config', authorize('superadmin', 'manager'), ctrl.upsertSlotConfig);
+router.post('/block-date', authorize('superadmin', 'manager'), ctrl.blockDate);
+router.post('/unblock-date', authorize('superadmin', 'manager'), ctrl.unblockDate);
 
 module.exports = router;

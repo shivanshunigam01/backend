@@ -1,21 +1,20 @@
-const express    = require('express');
-const controller = require('../../controllers/customerController');
-const { protect, authorize }    = require('../../middleware/auth');
-const { protectCustomer }       = require('../../middleware/customerAuth');
-
+const express = require('express');
 const router = express.Router();
+const ctrl = require('../../controllers/customerController');
+const { protect, authorize } = require('../../middleware/auth');
 
-// ── Public / Customer auth (no JWT required) ──────────────────────────────────
-router.post('/register',   controller.registerCustomer);
-router.post('/login',      controller.loginCustomer);
-router.post('/verify-otp', controller.verifyOtp);
+// Public customer routes (no auth)
+router.post('/register', ctrl.registerCustomer);
+router.post('/send-otp', ctrl.sendOtp);
+router.post('/verify-otp', ctrl.verifyOtp);
+router.post('/upload-dl', ctrl.uploadDL);
 
-// ── Customer protected ────────────────────────────────────────────────────────
-router.get('/me', protectCustomer, controller.getMyProfile);
+// Admin protected routes
+router.use(protect);
 
-// ── Admin protected ───────────────────────────────────────────────────────────
-router.get('/',    protect, authorize('superadmin', 'manager', 'executive'), controller.getCustomers);
-router.get('/:id', protect, authorize('superadmin', 'manager', 'executive'), controller.getCustomerById);
-router.put('/:id', protect, authorize('superadmin', 'manager'),              controller.updateCustomer);
+router.get('/', ctrl.getCustomers);
+router.get('/:id', ctrl.getCustomerById);
+router.put('/:id', authorize('superadmin', 'manager'), ctrl.updateCustomer);
 
+// Required by routes/index.js: require('./td/customers').router
 module.exports = { router };

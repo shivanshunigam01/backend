@@ -1,39 +1,41 @@
-const Admin     = require('../models/Admin');
+const Admin = require('../models/Admin');
 const TDBooking = require('../models/TDBooking');
 
 /**
- * Auto-assign the least-loaded available executive for a given slot.
- * Falls back to null if no executive is free (caller can do manual assignment).
+ * Auto-assign an available executive for a given branch + slot.
+ * Returns an Admin doc or null (manual assignment needed).
  */
-exports.autoAssignExecutive = async (branchId, slotDate, slotTime, slotDuration = 30) => {
+async function autoAssignExecutive(branchId, slotDate, slotTime) {
   const executives = await Admin.find({ role: 'executive', active: true });
   if (!executives.length) return null;
 
-  const startOfDay = new Date(slotDate); startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay   = new Date(slotDate); endOfDay.setHours(23, 59, 59, 999);
+  const dateStr = new Date(slotDate).toISOString().split('T')[0];
+  const startOfDay = new Date(`${dateStr}T00:00:00.000Z`);
+  const endOfDay = new Date(`${dateStr}T23:59:59.999Z`);
 
-  const loads = await Promise.all(
-    executives.map(async (exec) => {
-      const [bookingsToday, slotConflict] = await Promise.all([
-        TDBooking.countDocuments({
-          assignedExecutive: exec._id,
-          slotDate: { $gte: startOfDay, $lte: endOfDay },
-          bookingStatus: { $in: ['CONFIRMED', 'PENDING', 'IN_PROGRESS'] }
-        }),
-        TDBooking.exists({
-          assignedExecutive: exec._id,
-          slotDate: { $gte: startOfDay, $lte: endOfDay },
-          slotTime,
-          bookingStatus: { $in: ['CONFIRMED', 'PENDING', 'IN_PROGRESS'] }
-        })
-      ]);
-      return { exec, bookingsToday, hasConflict: !!slotConflict };
-    })
+  const busyBookings = await TDBooking.find({
+    slotDate: { $gte: startOfDay, $lte: endOfDay },
+    slotTime,
+    bookingStatus: { $nin: ['CANCELLED', 'MISSED'] },
+    assignedExecutive: { $exists: true, $ne: null }
+  }).select('assignedExecutive');
+
+  const busyIds = new Set(busyBookings.map((b) => String(b.assignedExecutive)));
+
+  const available = executives.filter((e) => !busyIds.has(String(e._id)));
+  if (!available.length) return null;
+
+  // Sort by workload (least bookings first) — basic round-robin
+  const counts = await Promise.all(
+    available.map((e) =>
+      TDBooking.countDocuments({
+        assignedExecutive: e._id,
+        bookingStatus: { $nin: ['CANCELLED', 'MISSED'] }
+      }).then((c) => ({ exec: e, count: c }))
+    )
   );
+  counts.sort((a, b) => a.count - b.count);
+  return counts[0].exec;
+}
 
-  const available = loads
-    .filter(e => !e.hasConflict)
-    .sort((a, b) => a.bookingsToday - b.bookingsToday);
-
-  return available.length ? available[0].exec : null;
-};
+module.exports = { autoAssignExecutive };

@@ -1,13 +1,12 @@
-const express    = require('express');
-const controller = require('../../controllers/tdReportController');
+const express = require('express');
+const router = express.Router();
+const ctrl = require('../../controllers/tdReportController');
 const { protect, authorize } = require('../../middleware/auth');
 
-const router = express.Router();
 router.use(protect);
 
-router.get('/admin',    authorize('superadmin'),            controller.getAdminDashboard);
-router.get('/manager',  authorize('superadmin', 'manager'), controller.getManagerDashboard);
-router.get('/executive',                                    controller.getExecutiveDashboard);
-router.get('/vehicles', authorize('superadmin', 'manager'), controller.getVehicleReport);
+router.get('/admin', authorize('superadmin', 'manager'), ctrl.getAdminDashboard);
+router.get('/manager', authorize('superadmin', 'manager'), ctrl.getManagerDashboard);
+router.get('/executive', ctrl.getExecutiveDashboard);
 
 module.exports = router;

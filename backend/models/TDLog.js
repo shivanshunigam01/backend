@@ -1,33 +1,42 @@
 const mongoose = require('mongoose');
 
-const GPSPointSchema = new mongoose.Schema({
-  lat:       { type: Number },
-  lng:       { type: Number },
-  timestamp: { type: Date }
+const GpsPointSchema = new mongoose.Schema({
+  lat: Number,
+  lng: Number,
+  timestamp: Date
 }, { _id: false });
 
 const TDLogSchema = new mongoose.Schema({
-  bookingId:            { type: mongoose.Schema.Types.ObjectId, ref: 'TDBooking', required: true, unique: true },
-  executiveId:          { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
-  customerId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
-  vehicleId:            { type: mongoose.Schema.Types.ObjectId, ref: 'DemoVehicle' },
-  openingOdometer:      { type: Number },
-  closingOdometer:      { type: Number },
-  totalKM:              { type: Number },
-  openingBattery:       { type: Number },
-  closingBattery:       { type: Number },
-  batteryUsed:          { type: Number },
-  startTime:            { type: Date },
-  endTime:              { type: Date },
-  durationMinutes:      { type: Number },
-  startPhotoUrl:        { type: String },
-  endPhotoUrl:          { type: String },
-  damageNotes:          { type: String, trim: true },
-  executiveRemarks:     { type: String, trim: true },
+  bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'TDBooking', required: true },
+  executiveId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+  vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'DemoVehicle' },
+  openingOdometer: { type: Number },
+  closingOdometer: { type: Number },
+  totalKM: { type: Number },
+  openingBattery: { type: Number, min: 0, max: 100 },
+  closingBattery: { type: Number, min: 0, max: 100 },
+  startTime: { type: Date },
+  endTime: { type: Date },
+  durationMinutes: { type: Number },
+  startPhotoUrl: { type: String },
+  endPhotoUrl: { type: String },
+  damageNotes: { type: String, trim: true },
+  executiveRemarks: { type: String, trim: true },
   customerSignatureUrl: { type: String },
-  gpsRoute:             [GPSPointSchema],
-  customerOtpVerified:  { type: Boolean, default: false },
-  status:               { type: String, enum: ['STARTED', 'COMPLETED'], default: 'STARTED' }
+  customerOtpVerified: { type: Boolean, default: false },
+  gpsRoute: [GpsPointSchema],
+  status: { type: String, enum: ['STARTED', 'COMPLETED', 'ABORTED'], default: 'STARTED' }
 }, { timestamps: true });
+
+TDLogSchema.pre('save', function (next) {
+  if (this.closingOdometer != null && this.openingOdometer != null) {
+    this.totalKM = Math.max(0, this.closingOdometer - this.openingOdometer);
+  }
+  if (this.endTime && this.startTime) {
+    this.durationMinutes = Math.round((this.endTime - this.startTime) / 60000);
+  }
+  next();
+});
 
 module.exports = mongoose.model('TDLog', TDLogSchema);

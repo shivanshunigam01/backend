@@ -1,171 +1,175 @@
-const TDLog              = require('../models/TDLog');
-const TDBooking          = require('../models/TDBooking');
-const DemoVehicle        = require('../models/DemoVehicle');
-const Customer           = require('../models/Customer');
-const Lead               = require('../models/Lead');
-const LeadStageHistory   = require('../models/LeadStageHistory');
-const asyncHandler       = require('../utils/asyncHandler');
-const ApiError           = require('../utils/ApiError');
-const { getPagination, buildPaginatedResponse } = require('../utils/pagination');
-const { updateVehicleStatus } = require('../utils/vehicleLock');
-const { sendNotification }    = require('../utils/notifications');
+const TDLog = require('../models/TDLog');
+const TDBooking = require('../models/TDBooking');
+const DemoVehicle = require('../models/DemoVehicle');
+const Customer = require('../models/Customer');
+const Lead = require('../models/Lead');
+const LeadStageHistory = require('../models/LeadStageHistory');
+const VehicleStatusLog = require('../models/VehicleStatusLog');
+const asyncHandler = require('../utils/asyncHandler');
+const ApiError = require('../utils/ApiError');
+const { notifyTDCompleted } = require('../utils/notifications');
 const { checkDepletionAlerts } = require('../utils/depletionEngine');
 
-const populateLog = (q) => q
-  .populate('bookingId',   'bookingId slotDate slotTime slotDuration bookingStatus')
-  .populate('executiveId', 'name email')
-  .populate('customerId',  'name mobile customerId')
-  .populate('vehicleId',   'vehicleId model variant registrationNo batteryPercent');
-
-// ─── Start Test Drive ─────────────────────────────────────────────────────────
-
 exports.startTestDrive = asyncHandler(async (req, res) => {
-  const { bookingId, openingOdometer, openingBattery, startPhotoUrl, customerOtpVerified, gpsLocation } = req.body;
-  if (!bookingId) throw new ApiError(400, 'bookingId is required');
+  const { bookingId, openingOdometer, openingBattery, startPhotoUrl, customerOtpVerified } = req.body;
 
   const booking = await TDBooking.findById(bookingId);
   if (!booking) throw new ApiError(404, 'Booking not found');
   if (!['CONFIRMED', 'PENDING'].includes(booking.bookingStatus)) {
-    throw new ApiError(400, `Cannot start a test drive for a booking in status: ${booking.bookingStatus}`);
+    throw new ApiError(400, `Booking is ${booking.bookingStatus} — cannot start test drive`);
   }
 
-  const existing = await TDLog.findOne({ bookingId });
-  if (existing && existing.status === 'STARTED') {
-    throw new ApiError(409, 'Test drive is already in progress for this booking');
-  }
+  const existing = await TDLog.findOne({ bookingId, status: 'STARTED' });
+  if (existing) throw new ApiError(409, 'Test drive already started for this booking');
 
   const log = await TDLog.create({
     bookingId,
-    executiveId:         booking.assignedExecutive || req.admin._id,
-    customerId:          booking.customerId,
-    vehicleId:           booking.vehicleId,
-    openingOdometer:     openingOdometer || 0,
-    openingBattery:      openingBattery  || 0,
-    startPhotoUrl:       startPhotoUrl   || null,
-    customerOtpVerified: customerOtpVerified || false,
-    startTime:           new Date(),
-    gpsRoute:            gpsLocation ? [{ ...gpsLocation, timestamp: new Date() }] : [],
-    status:              'STARTED'
+    executiveId: req.admin._id,
+    customerId: booking.customerId,
+    vehicleId: booking.vehicleId,
+    openingOdometer,
+    openingBattery,
+    startTime: new Date(),
+    startPhotoUrl,
+    customerOtpVerified: Boolean(customerOtpVerified),
+    status: 'STARTED'
   });
 
   booking.bookingStatus = 'IN_PROGRESS';
   await booking.save();
 
-  await updateVehicleStatus(booking.vehicleId, 'RUNNING', req.admin._id, 'Test drive started', booking._id);
+  if (booking.vehicleId) {
+    await DemoVehicle.findByIdAndUpdate(booking.vehicleId, { status: 'RUNNING', batteryPercent: openingBattery });
+    await VehicleStatusLog.create({
+      vehicleId: booking.vehicleId,
+      fromStatus: 'BOOKED',
+      toStatus: 'RUNNING',
+      changedBy: req.admin._id,
+      bookingId,
+      reason: 'Test drive started'
+    });
+  }
 
-  res.status(201).json({ success: true, data: log, message: 'Test drive started successfully' });
+  res.status(201).json({ success: true, data: log, message: 'Test drive started!' });
 });
 
-// ─── End Test Drive ───────────────────────────────────────────────────────────
-
 exports.endTestDrive = asyncHandler(async (req, res) => {
-  const log = await TDLog.findById(req.params.logId);
-  if (!log)                        throw new ApiError(404, 'Test drive log not found');
-  if (log.status === 'COMPLETED')  throw new ApiError(400, 'Test drive is already completed');
-
+  const { logId } = req.params;
   const { closingOdometer, closingBattery, endPhotoUrl, damageNotes, executiveRemarks, customerSignatureUrl } = req.body;
 
-  const endTime        = new Date();
-  const totalKM        = (closingOdometer || 0) - (log.openingOdometer || 0);
-  const durationMins   = Math.round((endTime - new Date(log.startTime)) / 60000);
-  const batteryUsed    = (log.openingBattery || 0) - (closingBattery || 0);
+  const log = await TDLog.findById(logId);
+  if (!log) throw new ApiError(404, 'Test drive log not found');
+  if (log.status !== 'STARTED') throw new ApiError(400, 'Test drive is not in progress');
 
-  log.closingOdometer      = closingOdometer;
-  log.closingBattery       = closingBattery;
-  log.totalKM              = totalKM;
-  log.batteryUsed          = batteryUsed;
-  log.endTime              = endTime;
-  log.durationMinutes      = durationMins;
-  log.endPhotoUrl          = endPhotoUrl;
-  log.damageNotes          = damageNotes;
-  log.executiveRemarks     = executiveRemarks;
+  log.closingOdometer = closingOdometer;
+  log.closingBattery = closingBattery;
+  log.endTime = new Date();
+  log.endPhotoUrl = endPhotoUrl;
+  log.damageNotes = damageNotes;
+  log.executiveRemarks = executiveRemarks;
   log.customerSignatureUrl = customerSignatureUrl;
-  log.status               = 'COMPLETED';
-  await log.save();
+  log.status = 'COMPLETED';
+  await log.save(); // totalKM and durationMinutes calculated by pre-save hook
 
-  // Update booking
   const booking = await TDBooking.findById(log.bookingId);
-  booking.bookingStatus = 'COMPLETED';
-  await booking.save();
+  if (booking) {
+    booking.bookingStatus = 'COMPLETED';
+    await booking.save();
+  }
 
-  // Update vehicle stats
-  const vehicle = await DemoVehicle.findById(log.vehicleId);
-  vehicle.currentOdometer  = closingOdometer || vehicle.currentOdometer;
-  vehicle.batteryPercent   = closingBattery  || vehicle.batteryPercent;
-  vehicle.totalTestDriveKM = (vehicle.totalTestDriveKM || 0) + Math.max(totalKM, 0);
-  vehicle.totalTestDrives  = (vehicle.totalTestDrives  || 0) + 1;
-  vehicle.isLocked         = false;
-  vehicle.lockExpiresAt    = null;
-  vehicle.status           = (closingBattery || 100) <= 20 ? 'BATTERY_LOW' : 'AVAILABLE';
-  await vehicle.save();
-
-  await updateVehicleStatus(vehicle._id, vehicle.status, req.admin._id, 'Test drive ended', booking._id);
-
-  // CRM: update lead stage
-  const customer = await Customer.findById(log.customerId);
-  if (customer?.leadId) {
-    const lead = await Lead.findById(customer.leadId);
-    if (lead) {
-      await LeadStageHistory.create({
-        leadId:    lead._id,
-        bookingId: booking._id,
-        fromStage: lead.status,
-        toStage:   'TEST_DRIVE_COMPLETED',
+  // Update vehicle: available, new odometer + battery
+  if (log.vehicleId) {
+    const vehicle = await DemoVehicle.findById(log.vehicleId);
+    if (vehicle) {
+      vehicle.status = 'AVAILABLE';
+      vehicle.currentOdometer = closingOdometer;
+      vehicle.batteryPercent = closingBattery;
+      vehicle.totalTestDriveKM = (vehicle.totalTestDriveKM || 0) + (log.totalKM || 0);
+      vehicle.totalTestDrives = (vehicle.totalTestDrives || 0) + 1;
+      await vehicle.save();
+      await VehicleStatusLog.create({
+        vehicleId: vehicle._id,
+        fromStatus: 'RUNNING',
+        toStatus: 'AVAILABLE',
         changedBy: req.admin._id,
-        reason:    'Test drive completed'
+        bookingId: log.bookingId,
+        reason: 'Test drive completed'
       });
-      lead.status = 'Interested';
-      await lead.save();
+      // Run depletion checks
+      checkDepletionAlerts(vehicle._id).catch(console.error);
     }
   }
 
-  // Feedback request notification
-  await sendNotification({
-    recipientType: 'CUSTOMER',
-    recipientId:   log.customerId,
-    channel:       'IN_APP',
-    templateKey:   'FEEDBACK_REQUEST',
-    payload:       { customerName: customer?.name || 'Customer', bookingId: booking.bookingId },
-    bookingId:     booking._id
-  });
+  // CRM: Move lead to TEST_DRIVE_COMPLETED
+  const customer = await Customer.findById(log.customerId);
+  if (customer && customer.leadId) {
+    const lead = await Lead.findById(customer.leadId);
+    if (lead) {
+      const prevStage = lead.status;
+      lead.status = 'Interested';
+      lead.remarks = `Test Drive completed — ${log.totalKM} km driven in ${log.durationMinutes} min`;
+      await lead.save();
+      await LeadStageHistory.create({
+        leadId: lead._id,
+        bookingId: log.bookingId,
+        fromStage: prevStage,
+        toStage: 'TEST_DRIVE_COMPLETED',
+        changedBy: req.admin._id,
+        reason: `TD completed — ${log.totalKM}km`
+      });
+    }
+  }
 
-  // Depletion alerts
-  await checkDepletionAlerts(vehicle._id, req.admin._id);
+  // Notifications
+  if (customer) {
+    notifyTDCompleted(booking, customer).catch(console.error);
+  }
 
-  res.json({ success: true, data: await populateLog(TDLog.findById(log._id)), message: 'Test drive completed successfully' });
-});
-
-// ─── Queries ──────────────────────────────────────────────────────────────────
-
-exports.getLogs = asyncHandler(async (req, res) => {
-  const { page, limit, skip } = getPagination(req);
-  const query = {};
-
-  if (req.query.vehicleId)   query.vehicleId   = req.query.vehicleId;
-  if (req.query.executiveId) query.executiveId = req.query.executiveId;
-  if (req.admin?.role === 'executive') query.executiveId = req.admin._id;
-
-  const [docs, total] = await Promise.all([
-    populateLog(TDLog.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit)),
-    TDLog.countDocuments(query)
+  await log.populate([
+    { path: 'bookingId', select: 'bookingId slotDate slotTime' },
+    { path: 'vehicleId', select: 'vehicleId model registrationNo' },
+    { path: 'customerId', select: 'name mobile' }
   ]);
 
-  res.json({ success: true, ...buildPaginatedResponse({ docs, total, page, limit }) });
+  res.json({ success: true, data: log, message: `Test drive completed! ${log.totalKM}km in ${log.durationMinutes} min.` });
 });
 
-exports.getLogByBooking = asyncHandler(async (req, res) => {
-  const log = await populateLog(TDLog.findOne({ bookingId: req.params.bookingId }));
-  if (!log) throw new ApiError(404, 'No log found for this booking');
+exports.getLogs = asyncHandler(async (req, res) => {
+  const query = {};
+  if (req.query.bookingId) query.bookingId = req.query.bookingId;
+  if (req.query.vehicleId) query.vehicleId = req.query.vehicleId;
+  if (req.query.executiveId) query.executiveId = req.query.executiveId;
+  if (req.query.status) query.status = req.query.status;
+
+  const logs = await TDLog.find(query)
+    .populate('bookingId', 'bookingId slotDate slotTime')
+    .populate('vehicleId', 'vehicleId model registrationNo')
+    .populate('customerId', 'name mobile')
+    .populate('executiveId', 'name')
+    .sort({ createdAt: -1 })
+    .limit(100);
+
+  res.json({ success: true, data: logs });
+});
+
+exports.getLogById = asyncHandler(async (req, res) => {
+  const log = await TDLog.findById(req.params.id)
+    .populate('bookingId')
+    .populate('vehicleId')
+    .populate('customerId')
+    .populate('executiveId', 'name email');
+  if (!log) throw new ApiError(404, 'Log not found');
   res.json({ success: true, data: log });
 });
 
-exports.addGpsPoint = asyncHandler(async (req, res) => {
-  const log = await TDLog.findById(req.params.logId);
+exports.updateGpsRoute = asyncHandler(async (req, res) => {
+  const { logId } = req.params;
+  const { points } = req.body;
+  const log = await TDLog.findByIdAndUpdate(
+    logId,
+    { $push: { gpsRoute: { $each: points } } },
+    { new: true }
+  );
   if (!log) throw new ApiError(404, 'Log not found');
-  if (log.status === 'COMPLETED') throw new ApiError(400, 'Cannot add GPS point to a completed test drive');
-
-  log.gpsRoute.push({ lat: req.body.lat, lng: req.body.lng, timestamp: new Date() });
-  await log.save();
-
-  res.json({ success: true, message: 'GPS point recorded', total: log.gpsRoute.length });
+  res.json({ success: true, message: 'GPS route updated' });
 });

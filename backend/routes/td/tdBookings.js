@@ -1,22 +1,19 @@
-const express    = require('express');
-const controller = require('../../controllers/tdBookingController');
-const { protect, authorize } = require('../../middleware/auth');
-const { protectCustomer }    = require('../../middleware/customerAuth');
-
+const express = require('express');
 const router = express.Router();
+const ctrl = require('../../controllers/tdBookingController');
+const { protect, authorize } = require('../../middleware/auth');
 
-// ── Customer portal ───────────────────────────────────────────────────────────
-router.get('/my',          protectCustomer, controller.getMyBookings);
-router.put('/cancel/:id',  protectCustomer, controller.cancelBooking);
-
-// ── Admin / Executive protected ───────────────────────────────────────────────
+// Protected routes for all admin/executive roles
 router.use(protect);
 
-router.get('/',                controller.getBookings);
-router.get('/:id',             controller.getBookingById);
-router.post('/',               controller.createBooking);
-router.put('/:id/confirm',     authorize('superadmin', 'manager'), controller.confirmBooking);
-router.put('/:id/reschedule',  controller.rescheduleBooking);
-router.put('/:id/cancel',      controller.cancelBooking);
+router.get('/my', ctrl.getMyBookings);
+router.get('/', ctrl.getBookings);
+router.get('/:id', ctrl.getBookingById);
+
+router.post('/', ctrl.createBooking);
+router.put('/:id', authorize('superadmin', 'manager'), ctrl.updateBooking);
+router.patch('/:id/cancel', ctrl.cancelBooking);
+router.patch('/:id/reschedule', ctrl.rescheduleBooking);
+router.patch('/:id/assign-executive', authorize('superadmin', 'manager'), ctrl.assignExecutive);
 
 module.exports = router;
