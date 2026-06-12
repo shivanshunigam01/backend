@@ -64,6 +64,7 @@ app.use('/api/v1/admin/td/logs', routes.tdLogs);
 app.use('/api/v1/admin/td/feedback', routes.tdFeedback);
 app.use('/api/v1/admin/td/reports', routes.tdReports);
 app.use('/api/v1/admin/td/customers', routes.tdCustomers);
+app.use('/api/v1/admin/td/slots', routes.tdSlots);
 // ────────────────────────────────────────────────────────────────────────────
 
 app.use(notFound);
