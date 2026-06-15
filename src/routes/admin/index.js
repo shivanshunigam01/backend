@@ -6,6 +6,8 @@ const dashboardController = require('../../controllers/dashboardController');
 const ctrl = require('../../controllers/adminResourceController');
 const metaLeadsController = require('../../controllers/metaLeadsController');
 const tdBookingsRoutes = require('./tdBookings');
+const tdVehiclesRoutes = require('./tdVehicles');
+const tdBranchesController = require('../../controllers/tdBranchesController');
 const { metaLeadsLimiter } = require('../../middleware/rateLimiter');
 const { loginValidator } = require('../../validators/authValidators');
 const { mongoIdParam, adminUserValidator, productValidator, mediaValidator, slideReorderValidator } = require('../../validators/adminValidators');
@@ -35,8 +37,10 @@ router.post('/meta-leads', metaLeadsController.createManualMetaLead);
 router.post('/meta-leads/bulk', metaLeadsController.bulkCreateMetaLeads);
 router.put('/meta-leads/:id', mongoIdParam, validate, metaLeadsController.updateMetaLead);
 
-// Test Drive module — bookings (prefix: /api/v1/admin/td/bookings)
+// Test Drive module
 router.use('/td/bookings', tdBookingsRoutes);
+router.use('/td/vehicles', tdVehiclesRoutes);
+router.get('/td/branches/public', tdBranchesController.listPublicBranches);
 
 // Test drives (legacy CRM)
 router.get('/test-drives', ctrl.getTestDrives);

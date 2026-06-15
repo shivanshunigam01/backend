@@ -1,0 +1,13 @@
+/**
+ * Register all TD-related Mongoose models before any populate() calls.
+ * Import this once from TD controllers/routes.
+ */
+require('./TDBranch');
+require('./TDCustomer');
+require('./TDVehicle');
+require('./TDStaff');
+require('./TDBooking');
+require('./TestDrive');
+require('./Admin');
+
+module.exports = {};

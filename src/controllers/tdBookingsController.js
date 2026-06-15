@@ -1,3 +1,5 @@
+require('../models/tdModels');
+
 const TDBooking = require('../models/TDBooking');
 const Admin = require('../models/Admin');
 const asyncHandler = require('../utils/asyncHandler');

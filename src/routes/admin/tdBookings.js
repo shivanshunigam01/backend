@@ -1,3 +1,5 @@
+require('../../models/tdModels');
+
 const router = require('express').Router();
 const validate = require('../../middleware/validate');
 const tdBookingsController = require('../../controllers/tdBookingsController');
