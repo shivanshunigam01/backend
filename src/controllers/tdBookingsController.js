@@ -8,6 +8,7 @@ const { successResponse } = require('../utils/apiResponse');
 const { buildPagination } = require('../utils/queryBuilder');
 const { formatTdBooking } = require('../utils/tdBookingFormatter');
 const { ensureBookingsCustomers, ensureBookingCustomer } = require('../utils/tdCustomerResolver');
+const { syncAllLegacyTestDrives } = require('../utils/tdBookingSync');
 
 const BOOKING_POPULATE = [
   { path: 'customerId' },
@@ -40,10 +41,20 @@ async function findBookingById(id) {
 exports.listBookings = asyncHandler(async (req, res) => {
   const { page, limit, skip } = buildPagination(req);
   const query = buildBookingListQuery(req);
-  const [docs, total] = await Promise.all([
+
+  let [docs, total] = await Promise.all([
     TDBooking.find(query).populate(BOOKING_POPULATE).sort({ slotDate: -1, createdAt: -1 }).skip(skip).limit(limit),
     TDBooking.countDocuments(query),
   ]);
+
+  if (total === 0 && page === 1 && !req.query.status && !req.query.date) {
+    await syncAllLegacyTestDrives();
+    [docs, total] = await Promise.all([
+      TDBooking.find(query).populate(BOOKING_POPULATE).sort({ slotDate: -1, createdAt: -1 }).skip(skip).limit(limit),
+      TDBooking.countDocuments(query),
+    ]);
+  }
+
   const enriched = await ensureBookingsCustomers(docs);
   const data = enriched.map(formatTdBooking);
   return successResponse(res, data, undefined, 200, { page, limit, total });
@@ -66,12 +77,9 @@ exports.listMyBookings = asyncHandler(async (req, res) => {
 });
 
 exports.listExecutives = asyncHandler(async (req, res) => {
-  const staff = await TDStaff.find({
-    active: true,
-    designation: { $in: ['sales_executive', 'sales_manager', 'branch_manager'] },
-  })
+  const staff = await TDStaff.find({ active: true })
     .select('name email role designation')
-    .sort({ name: 1 });
+    .sort({ designation: 1, name: 1 });
 
   const data = staff.map((s) => ({
     _id: s._id,

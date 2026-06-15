@@ -13,6 +13,7 @@ const {
   isSlotPast,
   formatTime12h,
 } = require('../utils/tdSlotUtils');
+const { branchFleetQuery } = require('../utils/tdVehicleLegacyImport');
 
 const ACTIVE_BOOKING_STATUSES = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'RESCHEDULED'];
 
@@ -73,7 +74,7 @@ async function computeSlotsForBranchDate(branchId, dateStr) {
   }
 
   const fleetAvailable = await TDVehicle.countDocuments({
-    branchId,
+    ...branchFleetQuery(branchId),
     status: 'AVAILABLE',
     isLocked: { $ne: true },
   });

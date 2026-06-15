@@ -5,6 +5,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/apiError');
 const { successResponse } = require('../utils/apiResponse');
 const { buildPagination } = require('../utils/queryBuilder');
+const { normalizeModel, branchFleetQuery } = require('../utils/tdVehicleLegacyImport');
+const { ensureTdFleet } = require('../utils/tdBootstrap');
 
 function formatVehicle(doc) {
   if (!doc) return null;
@@ -37,9 +39,15 @@ function formatVehicle(doc) {
 
 function buildVehicleQuery(req) {
   const query = {};
-  if (req.query.status) query.status = String(req.query.status).toUpperCase();
-  if (req.query.model) query.model = String(req.query.model).trim();
-  if (req.query.branchId) query.branchId = req.query.branchId;
+  if (req.query.status && req.query.status !== 'all') {
+    query.status = String(req.query.status).trim().toUpperCase();
+  }
+  if (req.query.model && req.query.model !== 'all') {
+    query.model = normalizeModel(req.query.model);
+  }
+  if (req.query.branchId) {
+    Object.assign(query, branchFleetQuery(req.query.branchId));
+  }
   return query;
 }
 
@@ -50,7 +58,8 @@ function nextVehicleId() {
 exports.listVehicles = asyncHandler(async (req, res) => {
   const { page, limit, skip } = buildPagination(req);
   const query = buildVehicleQuery(req);
-  const [docs, total] = await Promise.all([
+
+  let [docs, total] = await Promise.all([
     TDVehicle.find(query)
       .populate('branchId', 'name code')
       .sort({ createdAt: -1 })
@@ -58,6 +67,29 @@ exports.listVehicles = asyncHandler(async (req, res) => {
       .limit(limit),
     TDVehicle.countDocuments(query),
   ]);
+
+  if (
+    total === 0 &&
+    page === 1 &&
+    !req.query.status &&
+    !req.query.model &&
+    !req.query.branchId
+  ) {
+    const imported = await ensureTdFleet(
+      (await require('../models/TDBranch').findOne({ code: 'PATNA' }))?._id,
+    );
+    if (imported > 0) {
+      [docs, total] = await Promise.all([
+        TDVehicle.find(query)
+          .populate('branchId', 'name code')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit),
+        TDVehicle.countDocuments(query),
+      ]);
+    }
+  }
+
   return successResponse(res, docs.map(formatVehicle), undefined, 200, { page, limit, total });
 });
 
@@ -65,7 +97,7 @@ exports.createVehicle = asyncHandler(async (req, res) => {
   const body = req.body || {};
   const doc = await TDVehicle.create({
     vehicleId: body.vehicleId || nextVehicleId(),
-    model: body.model,
+    model: normalizeModel(body.model),
     variant: body.variant,
     registrationNo: body.registrationNo,
     vinNo: body.vinNo,
@@ -103,6 +135,7 @@ exports.updateVehicle = asyncHandler(async (req, res) => {
   for (const key of fields) {
     if (body[key] !== undefined) doc[key] = body[key];
   }
+  if (body.model !== undefined) doc.model = normalizeModel(body.model);
 
   await doc.save();
   await doc.populate('branchId', 'name code');

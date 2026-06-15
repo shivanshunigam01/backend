@@ -3,6 +3,7 @@ const TestDrive = require('../models/TestDrive');
 const Enquiry = require('../models/Enquiry');
 const asyncHandler = require('../utils/asyncHandler');
 const { successResponse } = require('../utils/apiResponse');
+const { syncTestDriveToTdBooking } = require('../utils/tdBookingSync');
 
 const MSG_LEAD_OK =
   'Thank you! Our EV advisor will contact you within 10 minutes.';
@@ -16,6 +17,7 @@ exports.createLead = asyncHandler(async (req, res) => {
 
 exports.createTestDrive = asyncHandler(async (req, res) => {
   const testDrive = await TestDrive.create(req.body);
+  await syncTestDriveToTdBooking(testDrive);
   return successResponse(res, testDrive, MSG_TD_OK, 201);
 });
 

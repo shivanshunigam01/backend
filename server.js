@@ -7,6 +7,12 @@ const PORT = process.env.PORT || 2000;
 (async () => {
   try {
     await connectDB();
+
+    if (process.env.TD_AUTO_BOOTSTRAP !== 'false') {
+      const { ensureTdModuleReady } = require('./src/utils/tdBootstrap');
+      await ensureTdModuleReady();
+    }
+
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
