@@ -24,11 +24,8 @@ module.exports = asyncHandler(async (req, res, next) => {
   const token = req.body.whatsappVerificationToken;
 
   if (!mobile || !token || typeof token !== 'string') {
-    return errorResponse(
-      res,
-      'WhatsApp verification required. Please verify your mobile number with the code we send.',
-      400
-    );
+    delete req.body.whatsappVerificationToken;
+    return next();
   }
 
   try {
