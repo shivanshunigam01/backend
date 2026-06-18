@@ -91,7 +91,6 @@ function applyLeadAssignment(lead, assignee) {
   }
 }
 
-/** Backfill missing assignedToEmail only — does not bump updatedAt. */
 async function repairExecutiveLeadAssignments(admin) {
   const email = normalizeEmail(admin?.email);
   if (!email) return;
@@ -125,6 +124,84 @@ async function repairExecutiveLeadAssignments(admin) {
   );
 }
 
+function assignedExecutiveIdsFilter(staffIds, staffEmail) {
+  const or = [];
+  for (const rawId of staffIds) {
+    const idStr = String(rawId);
+    const oid = toObjectId(rawId);
+    if (oid) {
+      or.push({ assignedExecutive: oid }, { assignedExecutive: idStr });
+    } else {
+      or.push({ assignedExecutive: idStr });
+    }
+  }
+  const email = normalizeEmail(staffEmail);
+  if (email) or.push({ assignedExecutiveEmail: email });
+  if (!or.length) return { assignedExecutive: null };
+  return { $or: or };
+}
+
+async function assignedExecutiveFilterAsync(admin) {
+  const staffIds = await resolveStaffIdsForUser(admin);
+  return assignedExecutiveIdsFilter(staffIds, admin?.email);
+}
+
+function bookingAssignedToStaff(booking, staffId, staffEmail) {
+  const assigned = booking?.assignedExecutive?._id || booking?.assignedExecutive;
+  const email = normalizeEmail(staffEmail);
+  if (email && normalizeEmail(booking?.assignedExecutiveEmail) === email) return true;
+  if (assigned && staffId && String(assigned) === String(staffId)) return true;
+  if (email && booking?.assignedExecutive?.email && normalizeEmail(booking.assignedExecutive.email) === email) {
+    return true;
+  }
+  return false;
+}
+
+function applyBookingExecutiveAssignment(booking, staff) {
+  if (staff) {
+    booking.assignedExecutive = toObjectId(staff._id) || staff._id;
+    booking.assignedExecutiveEmail = normalizeEmail(staff.email);
+  } else {
+    booking.assignedExecutive = undefined;
+    booking.assignedExecutiveEmail = undefined;
+  }
+}
+
+/** Backfill missing assignedExecutiveEmail on TD bookings for this executive. */
+async function repairExecutiveBookingAssignments(admin) {
+  const email = normalizeEmail(admin?.email);
+  if (!email) return;
+
+  const staffIds = await resolveStaffIdsForUser(admin);
+  const idOr = [];
+  for (const rawId of staffIds) {
+    const oid = toObjectId(rawId);
+    if (oid) idOr.push({ assignedExecutive: oid }, { assignedExecutive: String(rawId) });
+    else idOr.push({ assignedExecutive: String(rawId) });
+  }
+  if (!idOr.length) return;
+
+  const primaryId = toObjectId(admin._id) || admin._id;
+  const TDBooking = require('../models/TDBooking');
+
+  await TDBooking.updateMany(
+    {
+      $and: [
+        { $or: idOr },
+        {
+          $or: [
+            { assignedExecutiveEmail: { $exists: false } },
+            { assignedExecutiveEmail: null },
+            { assignedExecutiveEmail: '' },
+          ],
+        },
+      ],
+    },
+    { $set: { assignedExecutiveEmail: email, assignedExecutive: primaryId } },
+    { timestamps: false },
+  );
+}
+
 module.exports = {
   toObjectId,
   normalizeEmail,
@@ -138,4 +215,8 @@ module.exports = {
   leadAssignedToStaff,
   applyLeadAssignment,
   repairExecutiveLeadAssignments,
+  assignedExecutiveFilterAsync,
+  bookingAssignedToStaff,
+  applyBookingExecutiveAssignment,
+  repairExecutiveBookingAssignments,
 };

@@ -103,9 +103,22 @@ async function buildLeadQuery(admin, queryParams = {}) {
   if (queryParams.model) query.model = queryParams.model;
   if (queryParams.source) query.source = queryParams.source;
   if (queryParams.from || queryParams.to) {
-    query.createdAt = {};
-    if (queryParams.from) query.createdAt.$gte = new Date(queryParams.from);
-    if (queryParams.to) query.createdAt.$lte = new Date(`${queryParams.to}T23:59:59.999Z`);
+    const range = {};
+    if (queryParams.from) range.$gte = new Date(queryParams.from);
+    if (queryParams.to) range.$lte = new Date(`${queryParams.to}T23:59:59.999Z`);
+
+    if (queryParams.dateField === 'activity') {
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { lastActivityAt: range },
+          { lastActivityAt: { $exists: false }, updatedAt: range },
+          { lastActivityAt: null, updatedAt: range },
+        ],
+      });
+    } else {
+      query.createdAt = range;
+    }
   }
   if (queryParams.search) {
     const regex = new RegExp(queryParams.search.trim(), 'i');

@@ -10,6 +10,14 @@ const { buildPagination } = require('../utils/queryBuilder');
 const { formatTdBooking } = require('../utils/tdBookingFormatter');
 const { ensureBookingsCustomers, ensureBookingCustomer } = require('../utils/tdCustomerResolver');
 const { syncAllLegacyTestDrives } = require('../utils/tdBookingSync');
+const {
+  isExecutiveScopedUser,
+  assignedExecutiveFilterAsync,
+  bookingAssignedToStaff,
+  applyBookingExecutiveAssignment,
+  repairExecutiveBookingAssignments,
+} = require('../utils/leadAssignment');
+const { cloudinaryConfigured, uploadBufferToCloudinary } = require('../utils/cloudinaryUpload');
 
 const BOOKING_POPULATE = [
   { path: 'customerId' },
@@ -39,6 +47,13 @@ async function findBookingById(id) {
   return doc;
 }
 
+function assertBookingReadable(booking, admin) {
+  if (!isExecutiveScopedUser(admin)) return;
+  if (!bookingAssignedToStaff(booking, admin._id, admin.email)) {
+    throw new ApiError(403, 'This booking is not assigned to you');
+  }
+}
+
 exports.listBookings = asyncHandler(async (req, res) => {
   const { page, limit, skip } = buildPagination(req);
   const query = buildBookingListQuery(req);
@@ -65,8 +80,13 @@ exports.listMyBookings = asyncHandler(async (req, res) => {
   const { page, limit, skip } = buildPagination(req);
   const query = buildBookingListQuery(req);
 
-  const staffId = req.tdStaff?._id || req.admin?._id;
-  if (staffId) query.assignedExecutive = staffId;
+  if (isExecutiveScopedUser(req.admin)) {
+    await repairExecutiveBookingAssignments(req.admin);
+    Object.assign(query, await assignedExecutiveFilterAsync(req.admin));
+  } else {
+    const staffId = req.tdStaff?._id || req.admin?._id;
+    if (staffId) query.assignedExecutive = staffId;
+  }
 
   const [docs, total] = await Promise.all([
     TDBooking.find(query).populate(BOOKING_POPULATE).sort({ slotDate: -1, createdAt: -1 }).skip(skip).limit(limit),
@@ -96,6 +116,7 @@ exports.listExecutives = asyncHandler(async (req, res) => {
 
 exports.getBooking = asyncHandler(async (req, res) => {
   let doc = await findBookingById(req.params.id);
+  assertBookingReadable(doc, req.admin);
   doc = await ensureBookingCustomer(doc);
   await doc.populate(BOOKING_POPULATE);
   return successResponse(res, formatTdBooking(doc));
@@ -103,6 +124,7 @@ exports.getBooking = asyncHandler(async (req, res) => {
 
 exports.updateBooking = asyncHandler(async (req, res) => {
   const doc = await findBookingById(req.params.id);
+  assertBookingReadable(doc, req.admin);
   const { bookingStatus, dlVerified } = req.body || {};
 
   if (bookingStatus !== undefined) doc.bookingStatus = String(bookingStatus).toUpperCase();
@@ -111,6 +133,58 @@ exports.updateBooking = asyncHandler(async (req, res) => {
   await doc.save();
   await doc.populate(BOOKING_POPULATE);
   return successResponse(res, formatTdBooking(doc), 'Updated successfully');
+});
+
+exports.verifyDrivingLicence = asyncHandler(async (req, res) => {
+  const doc = await findBookingById(req.params.id);
+  assertBookingReadable(doc, req.admin);
+
+  if (doc.dlVerified && doc.dlImageUrl) {
+    await doc.populate(BOOKING_POPULATE);
+    return successResponse(res, formatTdBooking(doc), 'Driving licence already verified');
+  }
+
+  if (!req.file) {
+    throw new ApiError(400, 'Upload a driving licence image to verify');
+  }
+
+  const dlNumber = String(req.body?.dlNumber || '').trim().toUpperCase();
+  const dlValidUntilRaw = String(req.body?.dlValidUntil || '').trim();
+  if (!dlNumber) throw new ApiError(400, 'Driving licence number is required');
+  if (!dlValidUntilRaw) throw new ApiError(400, 'Driving licence validity date is required');
+
+  const dlValidUntil = new Date(dlValidUntilRaw);
+  if (Number.isNaN(dlValidUntil.getTime())) {
+    throw new ApiError(400, 'Invalid driving licence validity date');
+  }
+
+  if (!cloudinaryConfigured()) {
+    throw new ApiError(503, 'Image storage is not configured on the server');
+  }
+
+  const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
+    public_id: `td-dl-${doc.bookingId || doc._id}-${Date.now()}`,
+  });
+
+  if (doc.dlImagePublicId && doc.dlImagePublicId !== uploaded.public_id) {
+    try {
+      const cloudinary = require('../config/cloudinary');
+      await cloudinary.uploader.destroy(doc.dlImagePublicId, { resource_type: 'image' });
+    } catch {
+      /* ignore cleanup errors */
+    }
+  }
+
+  doc.dlVerified = true;
+  doc.dlVerifiedAt = new Date();
+  doc.dlNumber = dlNumber;
+  doc.dlValidUntil = dlValidUntil;
+  doc.dlImageUrl = uploaded.secure_url;
+  doc.dlImagePublicId = uploaded.public_id;
+
+  await doc.save();
+  await doc.populate(BOOKING_POPULATE);
+  return successResponse(res, formatTdBooking(doc), 'Driving licence verified and saved');
 });
 
 exports.cancelBooking = asyncHandler(async (req, res) => {
@@ -130,7 +204,7 @@ exports.assignExecutive = asyncHandler(async (req, res) => {
   const staff = await TDStaff.findById(executiveId);
   if (!staff || !staff.active) throw new ApiError(404, 'Executive not found');
 
-  doc.assignedExecutive = staff._id;
+  applyBookingExecutiveAssignment(doc, staff);
   if (doc.bookingStatus === 'PENDING') doc.bookingStatus = 'CONFIRMED';
   await doc.save();
   await doc.populate(BOOKING_POPULATE);
