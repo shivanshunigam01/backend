@@ -154,6 +154,65 @@ async function buildLeadAdminReport({ from, to, executiveId } = {}) {
   const bySource = Object.fromEntries(leadsBySource.map((r) => [r._id || 'Unknown', r.count]));
   const byModel = Object.fromEntries(leadsByModel.map((r) => [r._id || 'Unknown', r.count]));
 
+  const sourceConversionMap = new Map();
+  for (const lead of leads) {
+    const source = lead.source || 'Unknown';
+    if (!sourceConversionMap.has(source)) {
+      sourceConversionMap.set(source, { source, totalLeads: 0, convertedCount: 0, conversionRate: 0 });
+    }
+    const row = sourceConversionMap.get(source);
+    row.totalLeads += 1;
+    if (isConverted(lead.status)) row.convertedCount += 1;
+  }
+  const bySourceConversion = [...sourceConversionMap.values()]
+    .map((row) => ({
+      ...row,
+      conversionRate: row.totalLeads > 0 ? Math.round((row.convertedCount / row.totalLeads) * 100) : 0,
+    }))
+    .sort((a, b) => b.conversionRate - a.conversionRate || b.totalLeads - a.totalLeads);
+
+  const execSourceMap = new Map();
+  for (const lead of leads) {
+    const execId = lead.assignedTo?._id || lead.assignedTo;
+    if (!execId) continue;
+    const execKey = String(execId);
+    const execName = lead.assignedTo?.name || 'Unknown';
+    if (!execSourceMap.has(execKey)) {
+      execSourceMap.set(execKey, {
+        executiveId: execKey,
+        name: execName,
+        sources: new Map(),
+      });
+    }
+    const execRow = execSourceMap.get(execKey);
+    const source = lead.source || 'Unknown';
+    if (!execRow.sources.has(source)) {
+      execRow.sources.set(source, { source, totalLeads: 0, convertedCount: 0, conversionRate: 0 });
+    }
+    const srcRow = execRow.sources.get(source);
+    srcRow.totalLeads += 1;
+    if (isConverted(lead.status)) srcRow.convertedCount += 1;
+  }
+  const sourceConversionByExecutive = [...execSourceMap.values()]
+    .map((execRow) => ({
+      executiveId: execRow.executiveId,
+      name: execRow.name,
+      bySource: [...execRow.sources.values()]
+        .map((s) => ({
+          ...s,
+          conversionRate: s.totalLeads > 0 ? Math.round((s.convertedCount / s.totalLeads) * 100) : 0,
+        }))
+        .sort((a, b) => b.conversionRate - a.conversionRate || b.totalLeads - a.totalLeads),
+      totalLeads: [...execRow.sources.values()].reduce((sum, s) => sum + s.totalLeads, 0),
+      convertedCount: [...execRow.sources.values()].reduce((sum, s) => sum + s.convertedCount, 0),
+    }))
+    .map((execRow) => ({
+      ...execRow,
+      conversionRate:
+        execRow.totalLeads > 0 ? Math.round((execRow.convertedCount / execRow.totalLeads) * 100) : 0,
+    }))
+    .sort((a, b) => b.totalLeads - a.totalLeads);
+
   const execMap = new Map();
   const ensureExec = (id, name = 'Unknown') => {
     const key = id ? String(id) : 'unassigned';
@@ -349,6 +408,8 @@ async function buildLeadAdminReport({ from, to, executiveId } = {}) {
     pipeline,
     bySource,
     byModel,
+    bySourceConversion,
+    sourceConversionByExecutive,
     executivePerformance,
     followUpSummary: {
       pending: followUpsPending,
