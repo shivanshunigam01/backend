@@ -134,7 +134,7 @@ exports.getCrmLeads = asyncHandler(async (req, res) => {
   const [docs, total] = await Promise.all([
     Lead.find(query)
       .populate(LEAD_POPULATE)
-      .sort({ createdAt: -1 })
+      .sort({ updatedAt: -1, createdAt: -1 })
       .skip(skip)
       .limit(limit),
     Lead.countDocuments(query),
